@@ -1,63 +1,49 @@
-import torch
-import utils
 from matplotlib import pyplot as plt
 import matplotlib.patches
 from argparse import Namespace
-class Head(torch.nn.Module):
-    def __init__(self,base_network_info):
-        torch.nn.Module.__init__(self)
-        self.base_network_info = base_network_info
-        self.layers = utils.get_layers_till(**base_network_info)
-        pass
-    def forward(self,x):
-        for l in self.layers:
-            x = l(x)
-        return x
-    pass
-
-class RPN():
-    def __init__(self):
-        pass
-    def forward(self):
-        pass
+import numpy as np
 
 class BoundingBox():
     def __init__(self,**kwargs):
         self.set(**kwargs)
         pass
     def __getattr__(self,attr):
+        #print('in getattr')
+        cls = self.__class__
         if attr not in self.__dict__:
-            f = ('_'+attr)
-            if f in self.__dict__:
-                return self.__dict__[f](self)
-    def _width(self):
+            f = (attr + '_')
+            #print(f,f in cls.__dict__)
+            if f in cls.__dict__:
+                return cls.__dict__[f](self)
+    def width_(self):
         if 'width' not in self.__dict__:
             if  'hw' not in self.__dict__ and 'hh' not in self.__dict__:
                 return None
             self.width = self.hw*2
         return self.width
-    def _height(self):
+    def height_(self):
         if 'height' not in self.__dict__:
             if  'hw' not in self.__dict__ and 'hh' not in self.__dict__:
                 return None
             self.height = self.hh*2
         return self.height
-    def _topleft(self):
+    def topleft_(self):
         if 'topleft' not in self.__dict__:
             if  'center' not in self.__dict__ or any([k not in self.__dict__ for k in ['hh','hw']]):
                 return None
             self.topleft = self.center.y - self.hh, self.center.x - self.hw
         return self.topleft
-    def _bottomright(self):
+    def bottomright_(self):
         pass
-    def _bottomleft(self):
+    def bottomleft_(self):
+        #print('here')
         if  'center' not in self.__dict__ or any([k not in self.__dict__ for k in ['hh','hw']]):
                 return None
         self.bottomleft = Namespace()
         self.bottomleft.y, self.bottomleft.x = self.center.y + self.hh, self.center.x - self.hw
         return self.bottomleft
     def set(self,**kwargs):
-        for k in self.kwargs:
+        for k in kwargs:
             self.__dict__[k] = kwargs[k]
         if all(['topleft' in kwargs,'bottomright' in kwargs]):
             out = self.__class__.from_tlbr(self.topleft,self.bottomright)
@@ -81,8 +67,10 @@ def get_many_bboxes(valid_centers ,bbox_dims,stride):
     bboxes = []
     for c in valid_centers:
         hh,hw = bbox_dims[0]/2.,bbox_dims[1]/2.
-        cy,cx = valid_centers
-        bboxes.append(BoundingBox(center={'y':cy,'x':cx},hh=hh,hw=hw))
+        cy,cx = c
+        center = Namespace()
+        center.x,center.y = cx,cy
+        bboxes.append(BoundingBox(center=center,hh=hh,hw=hw))
         pass
     return bboxes
     pass
@@ -95,21 +83,23 @@ class AnchorGenerator():
         self.base_size = base_size
         self.scales = scales
         self.aspect_ratios = aspect_ratios
+        if not hasattr(strides,'__getitem__'):
+            strides = (strides,strides)
         self.strides = strides
         pass
     
     @classmethod
     def get_valid_centers(cls,
             grid_size,
-            height,
-            width,
+            bbox_dims,
             stride):
-
+        #import pdb;pdb.set_trace()
+        height,width = bbox_dims
         left, right = width//2. , grid_size[1] - width//2.      
         top, bottom = height//2. , grid_size[0] - width//2.
 
-        Y,X = np.meshgrid(np.arange(top,bottom,stride),np.arange(left,right,stride))
-        return zip(Y[:],X[:])
+        Y,X = np.meshgrid(np.arange(top,bottom,stride[0]),np.arange(left,right,stride[1]))
+        return zip(Y.flatten(),X.flatten())
     @classmethod
     def generate_anchors(cls,
             base_size,
@@ -117,14 +107,22 @@ class AnchorGenerator():
             aspect_ratios,
             stride,
             grid_size):
-        
+        if len(grid_size) == 4:
+            grid_size = grid_size[-2:]
+        elif len(grid_size) == 2:
+            pass
+        else:
+            raise NotImplementedError
+
         S,A = np.meshgrid(scales,aspect_ratios)
         S,A = S.flatten(),A.flatten()
         bboxes = []
         for s,a in zip(S,A):
-            bbox_dims = [d*s*_ for d,_ in zip(base_size,a)]
-            valid_centers = get_valid_centers(*bbox_dims,stride)
+            bbox_dims = [d*s*a for d in base_size]
+            valid_centers = cls.get_valid_centers(grid_size,bbox_dims,stride)
             bboxes.extend(get_many_bboxes(valid_centers ,bbox_dims,stride))
+            
+            #import pdb; pdb.set_trace()
         return bboxes
 
     def __call__(self,
@@ -149,7 +147,8 @@ class AnchorGenerator():
 
     @classmethod
     def visualize(cls,
-            anchors):
+            anchors,
+            ):
         pass
 
     def visualize(self,
